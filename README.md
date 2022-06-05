@@ -2,5 +2,5 @@
 
 Gompiler is My Go compiler.
 
-quote:
+reference:
 https://qiita.com/DQNEO/items/2efaec18772a1ae3c198
