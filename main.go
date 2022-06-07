@@ -19,6 +19,10 @@ func emitOSExit() {
 	fmt.Printf("  syscall\n\n")            // emit syscall
 }
 
+func emitSwap() {
+
+}
+
 func emitExpr(expr ast.Expr) {
 	switch e := expr.(type) {
 	case *ast.BasicLit:
@@ -36,7 +40,11 @@ func emitExpr(expr ast.Expr) {
 		fmt.Printf("  popq %%rdi\n")
 		switch e.Op.String() {
 		case "+":
-			fmt.Printf("  addq %%rdi %%rax\n")
+			fmt.Printf("  addq %%rdi, %%rax\n")
+			fmt.Printf("  pushq %%rax\n")
+		case "-":
+			fmt.Printf("  subq %%rbx, %%rdi\n")
+			fmt.Printf("  movq %%rdi, %%rax\n")
 			fmt.Printf("  pushq %%rax\n")
 		default:
 			panic(fmt.Errorf("unexpected binary operator: %s", e.Op.String()))
