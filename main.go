@@ -14,7 +14,7 @@ func emitOSExit() {
 	fmt.Printf("_start:\n")                // _start label: entry point
 	fmt.Printf("  callq main.main\n\n")    // call main.main
 	fmt.Printf("os.Exit:\n")               // os.Exit label: exit
-	fmt.Printf("  movq 8(%%rsp), %%rdi\n") // rsp(stack pointer register) + 8 address  value(42J(decimal) = 2a(hex)) to rdi(destination register)
+	fmt.Printf("  movq 8(%%rsp), %%rdi\n") // rsp(stack pointer register) + 8 address  value(42(decimal) = 2a(hex)) to rdi(destination register)
 	fmt.Printf("  movq $60, %%rax\n")      // rax(accumulator register) = 60
 	fmt.Printf("  syscall\n\n")            // emit syscall
 }
@@ -52,6 +52,6 @@ func main() {
 	emitExpr(expr)
 	fmt.Printf("  popq %%rax\n")    // pop rax value and increament rs
 	fmt.Printf("  pushq %%rax\n")   // decrement rsp and push rax value to rsp
-	fmt.Printf("  callq os.Exit\n") // decrement rsp and write next rip address(os.Exit) to rsp
+	fmt.Printf("  callq os.Exit\n") // decrement (rsp address) - 8 and write next rip address(os.Exit) to rsp address
 	fmt.Printf("  ret\n")
 }
