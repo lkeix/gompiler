@@ -19,15 +19,6 @@ func emitOSExit() {
 	fmt.Printf("  syscall\n\n")            // emit syscall
 }
 
-func emitBasicLit(expr *ast.BasicLit) {
-	val := expr.Value
-	ival, err := strconv.Atoi(val)
-	must(err)
-	fmt.Printf("# %T\n", expr)
-	fmt.Printf("  movq $%d, %%rax\n", ival)
-	fmt.Printf("  pushq %%rax\n")
-}
-
 func emitExpr(expr ast.Expr) {
 	switch e := expr.(type) {
 	case *ast.ParenExpr: // "(" or ")" expr
@@ -39,6 +30,15 @@ func emitExpr(expr ast.Expr) {
 	default:
 		must(fmt.Errorf("unexpected expr type %T", expr))
 	}
+}
+
+func emitBasicLit(expr *ast.BasicLit) {
+	val := expr.Value
+	ival, err := strconv.Atoi(val)
+	must(err)
+	fmt.Printf("# %T\n", expr)
+	fmt.Printf("  movq $%d, %%rax\n", ival)
+	fmt.Printf("  pushq %%rax\n")
 }
 
 func emitBinaryExpr(expr *ast.BinaryExpr) {
