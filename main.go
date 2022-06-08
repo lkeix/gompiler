@@ -36,8 +36,8 @@ func emitExpr(expr ast.Expr) {
 		fmt.Printf("# start %T\n", expr)
 		emitExpr(e.X)
 		emitExpr(e.Y)
-		fmt.Printf("  popq %%rbx\n")
-		fmt.Printf("  popq %%rdi\n")
+		fmt.Printf("  popq %%rbx # right\n")
+		fmt.Printf("  popq %%rdi # left\n")
 		switch e.Op.String() {
 		case "+":
 			fmt.Printf("  addq %%rdi, %%rax\n")
@@ -45,6 +45,9 @@ func emitExpr(expr ast.Expr) {
 		case "-":
 			fmt.Printf("  subq %%rbx, %%rdi\n")
 			fmt.Printf("  movq %%rdi, %%rax\n")
+			fmt.Printf("  pushq %%rax\n")
+		case "*":
+			fmt.Printf("  imulq %%rdi, %%rax\n")
 			fmt.Printf("  pushq %%rax\n")
 		default:
 			panic(fmt.Errorf("unexpected binary operator: %s", e.Op.String()))
@@ -61,7 +64,7 @@ func must(err error) {
 }
 
 func main() {
-	source := "40 - 2"
+	source := "2 - 40"
 	expr, err := parser.ParseExpr(source)
 	must(err)
 
