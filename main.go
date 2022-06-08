@@ -19,8 +19,13 @@ func emitOSExit() {
 	fmt.Printf("  syscall\n\n")            // emit syscall
 }
 
-func emitSwap() {
-
+func emitBasicLit(expr *ast.BasicLit) {
+	val := expr.Value
+	ival, err := strconv.Atoi(val)
+	must(err)
+	fmt.Printf("# %T\n", expr)
+	fmt.Printf("  movq $%d, %%rax\n", ival)
+	fmt.Printf("  pushq %%rax\n")
 }
 
 func emitExpr(expr ast.Expr) {
@@ -28,34 +33,32 @@ func emitExpr(expr ast.Expr) {
 	case *ast.ParenExpr: // "(" or ")" expr
 		emitExpr(e.X)
 	case *ast.BasicLit:
-		val := e.Value
-		ival, err := strconv.Atoi(val)
-		must(err)
-		fmt.Printf("# %T\n", expr)
-		fmt.Printf("  movq $%d, %%rax\n", ival)
-		fmt.Printf("  pushq %%rax\n")
+		emitBasicLit(e)
 	case *ast.BinaryExpr:
-		fmt.Printf("# start %T\n", expr)
-		emitExpr(e.X)
-		emitExpr(e.Y)
-		fmt.Printf("  popq %%rbx # right\n")
-		fmt.Printf("  popq %%rdi # left\n")
-		switch e.Op.String() {
-		case "+":
-			fmt.Printf("  addq %%rdi, %%rax\n")
-			fmt.Printf("  pushq %%rax\n")
-		case "-":
-			fmt.Printf("  subq %%rbx, %%rdi\n")
-			fmt.Printf("  movq %%rdi, %%rax\n")
-			fmt.Printf("  pushq %%rax\n")
-		case "*":
-			fmt.Printf("  imulq %%rdi, %%rax\n")
-			fmt.Printf("  pushq %%rax\n")
-		default:
-			panic(fmt.Errorf("unexpected binary operator: %s", e.Op.String()))
-		}
+		emitBinaryExpr(e)
 	default:
 		must(fmt.Errorf("unexpected expr type %T", expr))
+	}
+}
+
+func emitBinaryExpr(expr *ast.BinaryExpr) {
+	fmt.Printf("# start %T\n", expr)
+	emitExpr(expr)
+	emitExpr(expr)
+	fmt.Printf("  popq %%rdi # right\n")
+	fmt.Printf("  popq %%rax # left\n")
+	switch expr.Op.String() {
+	case "+":
+		fmt.Printf("  addq %%rdi, %%rax\n")
+		fmt.Printf("  pushq %%rax\n")
+	case "-":
+		fmt.Printf("  subq %%rdi, %%rax\n")
+		fmt.Printf("  pushq %%rax\n")
+	case "*":
+		fmt.Printf("  imulq %%rdi, %%rax\n")
+		fmt.Printf("  pushq %%rax\n")
+	default:
+		panic(fmt.Errorf("unexpected binary operator: %s", expr.Op.String()))
 	}
 }
 
@@ -66,7 +69,7 @@ func must(err error) {
 }
 
 func main() {
-	source := "1 + 2 * (20 + 1)"
+	source := "1 + 2 * (20 + 1) - 1"
 	expr, err := parser.ParseExpr(source)
 	must(err)
 
