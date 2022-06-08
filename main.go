@@ -64,7 +64,7 @@ func must(err error) {
 }
 
 func main() {
-	source := "2 - 40"
+	source := "2 + 20 - 2"
 	expr, err := parser.ParseExpr(source)
 	must(err)
 
