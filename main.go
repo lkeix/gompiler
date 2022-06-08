@@ -43,8 +43,8 @@ func emitBasicLit(expr *ast.BasicLit) {
 
 func emitBinaryExpr(expr *ast.BinaryExpr) {
 	fmt.Printf("# start %T\n", expr)
-	emitExpr(expr)
-	emitExpr(expr)
+	emitExpr(expr.X) // left
+	emitExpr(expr.Y) // right
 	fmt.Printf("  popq %%rdi # right\n")
 	fmt.Printf("  popq %%rax # left\n")
 	switch expr.Op.String() {
