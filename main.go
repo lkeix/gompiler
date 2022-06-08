@@ -21,6 +21,8 @@ func emitOSExit() {
 
 func emitExpr(expr ast.Expr) {
 	switch e := expr.(type) {
+	case *ast.CallExpr:
+		emitFunc(e)
 	case *ast.ParenExpr: // "(" or ")" expr
 		emitExpr(e.X)
 	case *ast.BasicLit:
@@ -62,6 +64,20 @@ func emitBinaryExpr(expr *ast.BinaryExpr) {
 	}
 }
 
+func emitFunc(expr *ast.CallExpr) {
+	pkg := expr.Args[0]
+	fun := expr.Fun
+	fmt.Printf("# fun = %T\n", fun)
+	switch fn := fun.(type) {
+	case *ast.SelectorExpr:
+		emitExpr(pkg)
+		fmt.Printf("  popq %%rax\n")
+		fmt.Printf("  pushq %%rax\n")
+		symbol := fmt.Sprintf("%s.%s", fn.X, fn.Sel)
+		fmt.Printf("  call %s\n", symbol)
+	}
+}
+
 func must(err error) {
 	if err != nil {
 		panic(err)
@@ -69,7 +85,7 @@ func must(err error) {
 }
 
 func main() {
-	source := "1 + 2 * (20 + 1) - 1"
+	source := "os.Exit(1 + 2 * (20 + 1) - 1)"
 	expr, err := parser.ParseExpr(source)
 	must(err)
 
@@ -79,8 +95,8 @@ func main() {
 	fmt.Printf(".globl main\n")
 	fmt.Printf("main.main:\n")
 	emitExpr(expr)
-	fmt.Printf("  popq %%rax\n")    // pop rax value and increament rs
-	fmt.Printf("  pushq %%rax\n")   // decrement rsp and push rax value to rsp
-	fmt.Printf("  callq os.Exit\n") // decrement (rsp address) - 8 and write next rip address(os.Exit) to rsp address
+	fmt.Printf("  popq %%rax\n")  // pop rax value and increament rs
+	fmt.Printf("  pushq %%rax\n") // decrement rsp and push rax value to rsp
+	// fmt.Printf("  callq os.Exit\n") // decrement (rsp address) - 8 and write next rip address(os.Exit) to rsp address
 	fmt.Printf("  ret\n")
 }
