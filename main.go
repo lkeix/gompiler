@@ -25,6 +25,8 @@ func emitSwap() {
 
 func emitExpr(expr ast.Expr) {
 	switch e := expr.(type) {
+	case *ast.ParenExpr: // "(" or ")" expr
+		emitExpr(e.X)
 	case *ast.BasicLit:
 		val := e.Value
 		ival, err := strconv.Atoi(val)
@@ -64,7 +66,7 @@ func must(err error) {
 }
 
 func main() {
-	source := "2 + 20 - 2"
+	source := "1 + 2 * (20 + 1)"
 	expr, err := parser.ParseExpr(source)
 	must(err)
 
