@@ -101,7 +101,11 @@ func emitDeclFunc(pkg string, DeclFunc *ast.FuncDecl) {
 	fmt.Printf("%s.%s:\n", pkg, DeclFunc.Name)
 
 	// emit assembly code for function body. parse {...}
-	for _, stmt := range DeclFunc.Body.List {
+	emitFuncBody(DeclFunc.Body)
+}
+
+func emitFuncBody(body *ast.BlockStmt) {
+	for _, stmt := range body.List {
 		switch stmt.(type) {
 		case *ast.ExprStmt:
 			expr := stmt.(*ast.ExprStmt).X
