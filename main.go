@@ -10,8 +10,15 @@ import (
 
 const MAIN = "main"
 
+type (
+	stringLiteral struct {
+		tag   string
+		value string
+	}
+)
+
 var (
-	stringLiterals []string
+	stringLiterals []stringLiteral
 )
 
 // AT&T syntax
@@ -20,6 +27,7 @@ func osExit() {
 	fmt.Printf("os.Exit:\n")               // os.Exit label: exit
 	fmt.Printf("  movq 8(%%rsp), %%rdi\n") // rsp(stack pointer register) + 8 address  value(42(decimal) = 2a(hex)) to rdi(destination register)
 	fmt.Printf("  movq $60, %%rax\n")      // rax(accumulator register) = 60
+	fmt.Printf("  movq $0, %%rdi\n")       // exit code to rdi(destination register)
 	fmt.Printf("  syscall\n\n")            // emit syscall
 }
 
@@ -61,6 +69,8 @@ func semanticAnalyze(file *ast.File) {
 func declsWalk(decls []ast.Decl) {
 	for _, decl := range decls {
 		switch decl.(type) {
+		case *ast.GenDecl:
+			continue
 		case *ast.FuncDecl:
 			funcDecl := decl.(*ast.FuncDecl)
 			bodyWalk(funcDecl.Body.List)
@@ -103,8 +113,10 @@ func walkExpr(expr *ast.Expr) {
 func parseBasicLit(expr *ast.BasicLit) {
 	switch expr.Kind.String() {
 	// TODO INT
+	case "INT":
+		break
 	case "STRING":
-		stringLiterals = append(stringLiterals, expr.Value)
+		stringLiterals = append(stringLiterals, stringLiteral{tag: "", value: expr.Value})
 	default:
 		must(fmt.Errorf("unexpected basic literal type %T", expr))
 	}
@@ -126,12 +138,21 @@ func emitExpr(expr ast.Expr) {
 }
 
 func emitBasicLit(expr *ast.BasicLit) {
-	val := expr.Value
-	ival, err := strconv.Atoi(val)
-	must(err)
-	fmt.Printf("# %T\n", expr)
-	fmt.Printf("  movq $%d, %%rax\n", ival)
-	fmt.Printf("  pushq %%rax\n")
+	if expr.Kind.String() == "INT" {
+		val := expr.Value
+		ival, err := strconv.Atoi(val)
+		must(err)
+		fmt.Printf("# %T\n", expr)
+		fmt.Printf("  movq $%d, %%rax\n", ival)
+		fmt.Printf("  pushq %%rax\n")
+	} else if expr.Kind.String() == "STRING" {
+		fmt.Printf("  leaq %s, %%rax\n", stringLiterals[0].tag)
+		fmt.Printf("  pushq %%rax\n")
+		fmt.Printf("  pushq $%d\n", len(stringLiterals[0].value)-1-2)
+		stringLiterals = stringLiterals[1:]
+	} else {
+		must(fmt.Errorf("unexpected basic literal type %T", expr))
+	}
 }
 
 func emitBinaryExpr(expr *ast.BinaryExpr) {
@@ -156,12 +177,18 @@ func emitBinaryExpr(expr *ast.BinaryExpr) {
 }
 
 func emitFunc(expr *ast.CallExpr) {
-	pkg := expr.Args[0]
 	fun := expr.Fun
 	fmt.Printf("# fun = %T\n", fun)
 	switch fn := fun.(type) {
+	case *ast.Ident:
+		if fn.Name == "print" {
+			// build in print
+			emitExpr(expr.Args[0]) // push string pointer, push string len
+			fmt.Printf("  call runtime.print\n")
+			fmt.Printf("  addq $8, %%rsp\n")
+		}
 	case *ast.SelectorExpr:
-		emitExpr(pkg)
+		emitExpr(expr.Args[0])
 		fmt.Printf("  popq %%rax\n")
 		fmt.Printf("  pushq %%rax\n")
 		symbol := fmt.Sprintf("%s.%s", fn.X, fn.Sel)
@@ -195,9 +222,11 @@ func emitFuncBody(body *ast.BlockStmt) {
 func emitSL() {
 	fmt.Printf(".data\n")
 	for i, sl := range stringLiterals {
-		fmt.Printf("S%d:\n", i)
-		fmt.Printf("  %s\n", sl)
+		fmt.Printf(".S%d:\n", i)
+		fmt.Printf("  .string %s\n", sl.value)
+		stringLiterals[i].tag = fmt.Sprintf(".S%d", i)
 	}
+	fmt.Printf("\n")
 }
 
 func must(err error) {
@@ -213,6 +242,8 @@ func main() {
 	f, err := parser.ParseFile(fset, "./source/main.go", nil, parser.ParseComments)
 	must(err)
 
+	// semantic Analyze
+	semanticAnalyze(f)
 	// generate assembly code
 	generate(f)
 
