@@ -4,5 +4,7 @@ import "os"
 
 func main() {
 	print("hello\n")
-	os.Exit(1 + (20+1)*2 - 1)
+
+	print("hello2\n")
+	os.Exit(0)
 }

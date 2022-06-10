@@ -11,8 +11,8 @@ _start:
 
 simple.print:
   movq $2, %rdi # rdi is set to 2 as stderr
-  movq 16(%rsp), %rsi # rsi is set to the string to print
-  movq 8(%rsp),  %rdx # rdx is set to the length of the string
+  movq 16(%rsp), %rsi # rsi is set to the string to print. print string in (rsp + 0x16) address.
+  movq 8(%rsp),  %rdx # rdx is set to the length of the string. print string in (rsp + 0x8) address.
   movq $1, %rax # rax is set to 1 as stdout
   syscall
   ret

@@ -27,7 +27,6 @@ func osExit() {
 	fmt.Printf("os.Exit:\n")               // os.Exit label: exit
 	fmt.Printf("  movq 8(%%rsp), %%rdi\n") // rsp(stack pointer register) + 8 address  value(42(decimal) = 2a(hex)) to rdi(destination register)
 	fmt.Printf("  movq $60, %%rax\n")      // rax(accumulator register) = 60
-	fmt.Printf("  movq $0, %%rdi\n")       // exit code to rdi(destination register)
 	fmt.Printf("  syscall\n\n")            // emit syscall
 }
 
@@ -226,7 +225,6 @@ func emitSL() {
 		fmt.Printf("  .string %s\n", sl.value)
 		stringLiterals[i].tag = fmt.Sprintf(".S%d", i)
 	}
-	fmt.Printf("\n")
 }
 
 func must(err error) {
