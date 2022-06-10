@@ -26,6 +26,18 @@ func runtime() {
 	fmt.Printf("  callq main.main\n\n")
 }
 
+func print() {
+	fmt.Printf("# print\n")
+	fmt.Printf(".text\n")
+	fmt.Printf("runtime.print:\n")
+	fmt.Printf("  movq $2, %%rdi\n")        // set 2 to rdi (stderr)
+	fmt.Printf("  movq 16(%%rsp), %%rsi\n") // set 16(rsp) to rsi (string)
+	fmt.Printf("  movq 8(%%rsp), %%rdx\n")  // set 8(rsp) to rdx (length)
+	fmt.Printf("  movq $1, %%rax\n")        // set 1 to rax (syscall number)
+	fmt.Printf("  syscall\n")
+	fmt.Printf("  ret\n")
+}
+
 func generate(file *ast.File) {
 	for _, decl := range file.Decls {
 		switch decl.(type) {
@@ -126,6 +138,7 @@ func main() {
 	// define runtime and os.Exit
 	runtime()
 	osExit()
+	print()
 
 	// define file set
 	fset := token.NewFileSet()
