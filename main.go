@@ -10,6 +10,10 @@ import (
 
 const MAIN = "main"
 
+var (
+	stringLiterals []string
+)
+
 // AT&T syntax
 func osExit() {
 	fmt.Printf(".text\n")
@@ -39,11 +43,70 @@ func print() {
 }
 
 func generate(file *ast.File) {
+	emitSL()
 	for _, decl := range file.Decls {
 		switch decl.(type) {
 		case *ast.FuncDecl:
 			emitDeclFunc(MAIN, decl.(*ast.FuncDecl))
 		}
+	}
+}
+
+// semanticAnalyze analyzes the syntax tree and returns an error if there is any problem.
+// now semanticAnalyze extract string literals from the syntax tree
+func semanticAnalyze(file *ast.File) {
+	declsWalk(file.Decls)
+}
+
+func declsWalk(decls []ast.Decl) {
+	for _, decl := range decls {
+		switch decl.(type) {
+		case *ast.FuncDecl:
+			funcDecl := decl.(*ast.FuncDecl)
+			bodyWalk(funcDecl.Body.List)
+		default:
+			must(fmt.Errorf("unexpected declaration: %T", decl))
+		}
+	}
+}
+
+func bodyWalk(stmts []ast.Stmt) {
+	for _, stmt := range stmts {
+		switch stmt.(type) {
+		case *ast.ExprStmt:
+			expr := stmt.(*ast.ExprStmt).X
+			walkExpr(&expr)
+		default:
+			must(fmt.Errorf("Unexpected stmt type"))
+		}
+	}
+}
+
+func walkExpr(expr *ast.Expr) {
+	switch e := (*expr).(type) {
+	case *ast.CallExpr:
+		for _, arg := range e.Args {
+			walkExpr(&arg)
+		}
+	case *ast.ParenExpr: // "(" or ")" expr
+		walkExpr(&e.X)
+	case *ast.BasicLit:
+		parseBasicLit(e)
+	case *ast.BinaryExpr:
+		walkExpr(&e.X)
+		walkExpr(&e.Y)
+	default:
+		must(fmt.Errorf("unexpected expr type %T", *expr))
+	}
+}
+
+func parseBasicLit(expr *ast.BasicLit) {
+	switch expr.Kind.String() {
+	// TODO INT
+	case "STRING":
+		stringLiterals = append(stringLiterals, expr.Value)
+	default:
+		must(fmt.Errorf("unexpected basic literal type %T", expr))
 	}
 }
 
@@ -107,13 +170,13 @@ func emitFunc(expr *ast.CallExpr) {
 }
 
 // emitDeclFunc emits assembly code for a declarated function. parse func XXX(...) {...}
-func emitDeclFunc(pkg string, DeclFunc *ast.FuncDecl) {
-	fmt.Printf("# %T\n", DeclFunc)
+func emitDeclFunc(pkg string, funcDecl *ast.FuncDecl) {
+	fmt.Printf("# %T\n", funcDecl)
 	fmt.Printf(".text\n")
-	fmt.Printf("%s.%s:\n", pkg, DeclFunc.Name)
+	fmt.Printf("%s.%s:\n", pkg, funcDecl.Name)
 
 	// emit assembly code for function body. parse {...}
-	emitFuncBody(DeclFunc.Body)
+	emitFuncBody(funcDecl.Body)
 }
 
 func emitFuncBody(body *ast.BlockStmt) {
@@ -128,6 +191,15 @@ func emitFuncBody(body *ast.BlockStmt) {
 	}
 }
 
+// emitSL assmbly string literals in .data section
+func emitSL() {
+	fmt.Printf(".data\n")
+	for i, sl := range stringLiterals {
+		fmt.Printf("S%d:\n", i)
+		fmt.Printf("  %s\n", sl)
+	}
+}
+
 func must(err error) {
 	if err != nil {
 		panic(err)
@@ -135,11 +207,6 @@ func must(err error) {
 }
 
 func main() {
-	// define runtime and os.Exit
-	runtime()
-	osExit()
-	print()
-
 	// define file set
 	fset := token.NewFileSet()
 	// parse source from source/main.go
@@ -148,4 +215,9 @@ func main() {
 
 	// generate assembly code
 	generate(f)
+
+	// define runtime and os.Exit
+	runtime()
+	osExit()
+	print()
 }
