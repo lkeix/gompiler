@@ -2,9 +2,12 @@ package main
 
 import "os"
 
-func main() {
-	print("hello\n")
+var hoge int = 30
+var fuga int = 12
+var errorMessage string = "to stderr\n"
 
-	print("hello2\n")
-	os.Exit(0)
+func main() {
+	print("hello world\n")
+	print("hello world1\n")
+	os.Exit(1)
 }
