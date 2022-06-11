@@ -113,6 +113,10 @@ func bodyWalk(stmts []ast.Stmt) {
 
 func walkExpr(expr *ast.Expr) {
 	switch e := (*expr).(type) {
+	case *ast.Ident:
+		// what should do with ident? <- switch case make the same emitExpr
+		// add empty body this why without this statement, the program will not compile
+		break
 	case *ast.CallExpr:
 		for _, arg := range e.Args {
 			walkExpr(&arg)
@@ -184,6 +188,8 @@ func emitExpr(expr ast.Expr) {
 	switch e := expr.(type) {
 	case *ast.CallExpr:
 		emitFunc(e)
+	case *ast.Ident:
+		emitVariable(e.Obj)
 	case *ast.ParenExpr: // "(" or ")" expr
 		emitExpr(e.X)
 	case *ast.BasicLit:
@@ -192,6 +198,37 @@ func emitExpr(expr ast.Expr) {
 		emitBinaryExpr(e)
 	default:
 		must(fmt.Errorf("unexpected expr type %T", expr))
+	}
+}
+
+func emitVariable(obj *ast.Object) {
+	fmt.Printf("# ident kind=%v\n", obj.Kind)
+	fmt.Printf("# Obj=%v\n", obj)
+	if obj.Kind != ast.Var {
+		must(fmt.Errorf("ident kind should be ast.Var"))
+	}
+
+	valSpec, ok := obj.Decl.(*ast.ValueSpec)
+	if !ok {
+		must(fmt.Errorf("unexpected value spec type %T", obj.Decl))
+	}
+
+	typeIdent, ok := valSpec.Type.(*ast.Ident)
+	if !ok {
+		must(fmt.Errorf("unexpected type %T", valSpec.Type))
+	}
+
+	fmt.Printf("  movq %s+0(%%rip), %%rax\n", obj.Name) // object name(param name) address move to rax
+	fmt.Printf("  pushq %%rax\n")                       // push rax address to stack
+
+	switch typeIdent.Obj {
+	case globalInt:
+		break
+	case globalString:
+		fmt.Printf("  movq %s+8(%%rip), %%rax\n", obj.Name) // address stored string length move to rax
+		fmt.Printf("  pushq %%rax\n")                       // push rax address to stack
+	default:
+		must(fmt.Errorf("Unexpected global ident"))
 	}
 }
 
@@ -204,9 +241,10 @@ func emitBasicLit(expr *ast.BasicLit) {
 		fmt.Printf("  movq $%d, %%rax\n", ival)
 		fmt.Printf("  pushq %%rax\n")
 	} else if expr.Kind.String() == "STRING" {
-		fmt.Printf("  leaq %s, %%rax\n", stringLiterals[0].tag)
+		// FIXME: searchTag function computable complexity is O(n)
+		fmt.Printf("  leaq %s, %%rax\n", searchTag(expr.Value))
 		fmt.Printf("  pushq %%rax\n")
-		fmt.Printf("  pushq $%d\n", len(stringLiterals[0].value)-1-2)
+		fmt.Printf("  pushq $%d\n", len(expr.Value)-1-2)
 		stringLiterals = stringLiterals[1:]
 	} else {
 		must(fmt.Errorf("unexpected basic literal type %T", expr))

@@ -20,8 +20,7 @@ build:
 	go run main.go > main.s && \
 	as -o main.o main.s && \
 	ld -o a.out main.o && \
-	mv a.out main.out && \
-	rm -rf *.s *.o
+	mv a.out main.out
 
 clean:
 	rm -rf *.s *.o *.out
