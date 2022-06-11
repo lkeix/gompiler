@@ -8,5 +8,6 @@ var errorMessage string = "to stderr\n"
 
 func main() {
 	print("hello world\n")
+	print(errorMessage)
 	os.Exit(hoge + fuga)
 }
