@@ -102,11 +102,15 @@ func declWalk(decl *ast.Decl) {
 func bodyWalk(stmts []ast.Stmt) {
 	for _, stmt := range stmts {
 		switch stmt.(type) {
+		case *ast.DeclStmt: // escape panic error
+			continue
+		case *ast.AssignStmt: // escape panic error
+			continue
 		case *ast.ExprStmt:
 			expr := stmt.(*ast.ExprStmt).X
 			walkExpr(&expr)
 		default:
-			must(fmt.Errorf("Unexpected stmt type"))
+			must(fmt.Errorf("Unexpected stmt type: %T", stmt))
 		}
 	}
 }
@@ -304,13 +308,77 @@ func emitDeclFunc(pkg string, funcDecl *ast.FuncDecl) {
 
 func emitFuncBody(body *ast.BlockStmt) {
 	for _, stmt := range body.List {
-		switch stmt.(type) {
+		switch s := stmt.(type) {
 		case *ast.ExprStmt:
 			expr := stmt.(*ast.ExprStmt).X
 			emitExpr(expr)
+		case *ast.DeclStmt:
+			continue
+		case *ast.AssignStmt: // emit and analyze expression like x := y
+			fmt.Printf("  # *ast.AssignStmt\n")
+			emitAssignStmt(s)
 		default:
 			must(fmt.Errorf("unexpected stmt type %T", stmt))
 		}
+	}
+}
+
+func emitAssignStmt(stmt *ast.AssignStmt) {
+	lhs := stmt.Lhs[0] // lhs is left side of assignment. e.g. x := 5, lhs is x
+	rhs := stmt.Rhs[0] // rhs is right side of assignment. e.g. x := 5, rhs is 5
+	emitAddr(&lhs)
+	emitExpr(rhs) // push rhs to stack
+}
+
+func emitAddr(expr *ast.Expr) {
+	// emit variable address like emitGlobalVariables
+	switch e := (*expr).(type) {
+	case *ast.Ident:
+		if e.Obj.Kind == ast.Var {
+			emitVariableAddr(e.Obj)
+		}
+	}
+}
+
+func emitVariableAddr(obj *ast.Object) {
+	decl, ok := obj.Decl.(*ast.ValueSpec)
+	if !ok {
+		must(fmt.Errorf("unexpected variable decl type %T", obj.Decl))
+	}
+
+	fmt.Printf("  # emit variable address\n")
+	fmt.Printf("  # variable is %d\n", obj.Data)
+
+	isString := getType(decl.Type) == globalString
+	isInt := getType(decl.Type) == globalInt
+
+	// analyzed variable is global string variable.
+	if isString && getObjectData(obj) == -1 {
+		fmt.Printf("# Global\n")
+		fmt.Printf("  leaq %s+0(%%rip), %%rax\n", obj.Name)
+		fmt.Printf("  leaq %s+8(%%rip), %%rcx\n", obj.Name)
+		fmt.Printf("  pushq %%rax\n")
+		fmt.Printf("  pushq %%rcx\n")
+	}
+
+	// analyzed variable is local string variable.
+	if isString && getObjectData(obj) != -1 {
+		localOffset := getObjectData(obj)
+		fmt.Printf("  # Local\n")
+		fmt.Printf("  leaq -%d(%%rbp), %%rax\n # ptr %s", localOffset, obj.Name)
+		fmt.Printf("  leaq -%d(%%rbp), %%rcx\n # len %s", localOffset-8, obj.Name)
+		fmt.Printf("  pushq %%rax\n")
+		fmt.Printf("  pushq %%rcx\n")
+	}
+
+	if isInt && getObjectData(obj) == -1 {
+		fmt.Printf("  # Global\n")
+		fmt.Printf("  # leaq %s+0(%%rip), %%rax\n", obj.Name)
+	}
+	if isInt && getObjectData(obj) != -1 {
+		localOffset := getObjectData(obj)
+		fmt.Printf("  # Local\n")
+		fmt.Printf("  leaq -%d(%%rbp), %%rax # %s \n", localOffset, obj.Name)
 	}
 }
 
@@ -345,13 +413,38 @@ func emitSL() {
 	fmt.Printf("\n")
 }
 
+func getType(typeExpr ast.Expr) *ast.Object {
+	switch expr := typeExpr.(type) {
+	case *ast.Ident:
+		if expr.Obj.Kind == ast.Var {
+			return getType(expr.Obj.Decl.(*ast.ValueSpec).Type)
+		}
+		if expr.Obj.Kind == ast.Typ {
+			return expr.Obj
+		}
+	default:
+		must(fmt.Errorf("unexpected typeExpr type %T", typeExpr))
+	}
+	return nil
+}
+
+func getObjectData(object *ast.Object) int {
+	data, ok := object.Data.(int)
+
+	if !ok {
+		must(fmt.Errorf("unexpected object data type %T", object.Data))
+	}
+
+	return data
+}
+
 func searchTag(value string) string {
 	for _, sl := range stringLiterals {
 		if sl.value == value {
 			return sl.tag
 		}
 	}
-	must(fmt.Errorf("unexpected string literal value %s", value))
+	// must(fmt.Errorf("unexpected string literal value %s", value))
 	return ""
 }
 
