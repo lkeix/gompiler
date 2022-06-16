@@ -20,6 +20,13 @@ type (
 		value string
 		typ   *ast.Ident
 	}
+
+	Func struct {
+		decl      *ast.FuncDecl
+		localvars []*ast.ValueSpec
+		localarea int
+		argsarea  int
+	}
 )
 
 var (
@@ -41,6 +48,7 @@ var (
 		Data: nil,
 		Type: nil,
 	}
+	funcs []*Func
 )
 
 // AT&T syntax
@@ -71,47 +79,81 @@ func print() {
 	fmt.Printf("  ret\n\n")
 }
 
-func declsWalk(decls []ast.Decl) {
-	for _, decl := range decls {
-		switch decl.(type) {
-		case *ast.GenDecl:
-			// extract global variables before analyze declaration functions
-			parseGlobalVariables(decl.(*ast.GenDecl))
-		case *ast.FuncDecl:
-			funcDecl := decl.(*ast.FuncDecl)
-			bodyWalk(funcDecl.Body.List)
-		default:
-			must(fmt.Errorf("unexpected declaration: %T", decl))
-		}
-	}
-}
-
 func declWalk(decl *ast.Decl) {
+	localvars := make([]*ast.ValueSpec, 0)
+	localoffset := 0
+	paramoffset := 16
 	switch (*decl).(type) {
 	case *ast.GenDecl:
 		// extract global variables before analyze declaration functions
 		parseGlobalVariables((*decl).(*ast.GenDecl))
 	case *ast.FuncDecl:
 		funcDecl := (*decl).(*ast.FuncDecl)
-		bodyWalk(funcDecl.Body.List)
+		funcParamsWalk(funcDecl.Type.Params, &paramoffset)
+		bodyWalk(funcDecl.Body.List, localvars, &localoffset)
+		fnc := &Func{
+			decl:      funcDecl,
+			localvars: localvars,
+			localarea: localoffset * -1,
+			argsarea:  paramoffset,
+		}
+		funcs = append(funcs, fnc)
 	default:
 		must(fmt.Errorf("unexpected declaration: %T", decl))
 	}
 }
 
-func bodyWalk(stmts []ast.Stmt) {
+func funcParamsWalk(params *ast.FieldList, paramoffset *int) {
+	for _, field := range params.List {
+		obj := field.Names[0].Obj
+		varSize := 8                             // default size is int variable
+		if getType(field.Type) == globalString { // object type is string
+			varSize = 16
+		}
+		setObjectData(obj, *paramoffset)
+		*paramoffset += varSize
+	}
+}
+
+func bodyWalk(stmts []ast.Stmt, localvars []*ast.ValueSpec, localoffset *int) {
 	for _, stmt := range stmts {
-		switch stmt.(type) {
+		switch s := stmt.(type) {
 		case *ast.DeclStmt: // escape panic error
-			continue
+			walkDeclField(&s.Decl, localvars, localoffset)
 		case *ast.AssignStmt: // escape panic error
-			continue
+			walkAssignStmt(s)
 		case *ast.ExprStmt:
-			expr := stmt.(*ast.ExprStmt).X
+			expr := s.X
 			walkExpr(&expr)
+		case *ast.ReturnStmt:
+			for _, r := range s.Results {
+				walkExpr(&r)
+			}
 		default:
 			must(fmt.Errorf("Unexpected stmt type: %T", stmt))
 		}
+	}
+}
+
+func walkDeclField(decl *ast.Decl, localvars []*ast.ValueSpec, localoffset *int) {
+	switch decl := (*decl).(type) {
+	case *ast.GenDecl:
+		declSpec := decl.Specs[0]
+		switch ds := declSpec.(type) {
+		case *ast.ValueSpec:
+			varSpec := ds
+			obj := varSpec.Names[0].Obj
+			varSize := 8 // default size is int variable
+			if getType(varSpec.Type) == globalString {
+				varSize = 16
+			}
+
+			*localoffset -= varSize
+			setObjectData(obj, *localoffset)
+			localvars = append(localvars, ds)
+		}
+	default:
+		must(fmt.Errorf("unexpected type of declaration: %T", decl))
 	}
 }
 
@@ -135,6 +177,13 @@ func walkExpr(expr *ast.Expr) {
 	default:
 		must(fmt.Errorf("unexpected expr type %T", *expr))
 	}
+}
+
+func walkAssignStmt(stmt *ast.AssignStmt) {
+	// l := stmt.Lhs[0]
+	r := stmt.Rhs[0]
+	// walkExpr(&l)
+	walkExpr(&r)
 }
 
 func parseStringLiteral(expr *ast.BasicLit) {
@@ -205,12 +254,27 @@ func emitExpr(expr ast.Expr) {
 	}
 }
 
+func getLocalOffset(obj *ast.Object) int {
+	switch obj.Decl.(type) {
+	case *ast.Field:
+		return getObjectData(obj)
+	case *ast.ValueSpec:
+		return getObjectData(obj) * -1
+	default:
+		must(fmt.Errorf("unexpected obj type %T", obj))
+	}
+	return 0
+}
+
 func emitVariable(obj *ast.Object) {
-	fmt.Printf("# ident kind=%v\n", obj.Kind)
-	fmt.Printf("# Obj=%v\n", obj)
+	fmt.Printf("  # ident kind=%v\n", obj.Kind)
+	fmt.Printf("  # Obj=%v\n", obj)
+	fmt.Printf("  # obj.Data=%d\n", obj.Data)
 	if obj.Kind != ast.Var {
 		must(fmt.Errorf("ident kind should be ast.Var"))
 	}
+
+	localOffset := getLocalOffset(obj)
 
 	valSpec, ok := obj.Decl.(*ast.ValueSpec)
 	if !ok {
@@ -222,15 +286,25 @@ func emitVariable(obj *ast.Object) {
 		must(fmt.Errorf("unexpected type %T", valSpec.Type))
 	}
 
-	fmt.Printf("  movq %s+0(%%rip), %%rax\n", obj.Name) // object name(param name) address move to rax
-	fmt.Printf("  pushq %%rax\n")                       // push rax address to stack
-
 	switch typeIdent.Obj {
 	case globalInt:
+		if getObjectData(obj) == -1 {
+			fmt.Printf("  movq %s+0(%%rip), %%rax\n", obj.Name) // object name(param name) address move to rax
+			fmt.Printf("  pushq %%rax\n")                       // push rax address to stack
+		} else {
+			fmt.Printf("  movq %d(%%rip), %%rax # %s\n", localOffset, obj.Name) // emit local int variable
+		}
 		break
 	case globalString:
-		fmt.Printf("  movq %s+8(%%rip), %%rax\n", obj.Name) // address stored string length move to rax
-		fmt.Printf("  pushq %%rax\n")                       // push rax address to stack
+		if getObjectData(obj) == -1 { // obj data is global variable
+			fmt.Printf("  movq %s+8(%%rip), %%rax\n", obj.Name) // address stored string length move to rax
+			fmt.Printf("  pushq %%rax\n")                       // push rax address to stack
+		} else { // obj data is local variable
+			fmt.Printf("  movq %d(%%rbp), %%rax # ptr %s \n", localOffset, obj.Name)   // emit local string variable address
+			fmt.Printf("  movq %d(%%rbp), %%rcx # len %s \n", localOffset+8, obj.Name) // emit local string variable length
+		}
+		fmt.Printf("  pushq %%rax # ptr\n")
+		fmt.Printf("  pushq %%rcx # len\n")
 	default:
 		must(fmt.Errorf("Unexpected global ident"))
 	}
@@ -346,8 +420,8 @@ func emitVariableAddr(obj *ast.Object) {
 		must(fmt.Errorf("unexpected variable decl type %T", obj.Decl))
 	}
 
-	fmt.Printf("  # emit variable address\n")
-	fmt.Printf("  # variable is %d\n", obj.Data)
+	fmt.Printf("  # ident kind=%v\n", obj.Kind)
+	fmt.Printf("  # Obj=%v\n", obj)
 
 	isString := getType(decl.Type) == globalString
 	isInt := getType(decl.Type) == globalInt
@@ -365,8 +439,8 @@ func emitVariableAddr(obj *ast.Object) {
 	if isString && getObjectData(obj) != -1 {
 		localOffset := getObjectData(obj)
 		fmt.Printf("  # Local\n")
-		fmt.Printf("  leaq -%d(%%rbp), %%rax\n # ptr %s", localOffset, obj.Name)
-		fmt.Printf("  leaq -%d(%%rbp), %%rcx\n # len %s", localOffset-8, obj.Name)
+		fmt.Printf("  leaq -%d(%%rbp), %%rax # ptr %s\n", localOffset, obj.Name)
+		fmt.Printf("  leaq -%d(%%rbp), %%rcx # len %s\n", localOffset-8, obj.Name)
 		fmt.Printf("  pushq %%rax\n")
 		fmt.Printf("  pushq %%rcx\n")
 	}
@@ -438,6 +512,10 @@ func getObjectData(object *ast.Object) int {
 	return data
 }
 
+func setObjectData(object *ast.Object, i int) {
+	object.Data = i
+}
+
 func searchTag(value string) string {
 	for _, sl := range stringLiterals {
 		if sl.value == value {
@@ -503,7 +581,6 @@ func semanticAnalyze(file *ast.File) {
 	for _, decl := range file.Decls {
 		declWalk(&decl)
 	}
-	// declsWalk(file.Decls)
 }
 
 func generate(file *ast.File) {
@@ -515,11 +592,8 @@ func generate(file *ast.File) {
 	emitGlobalVariables()
 
 	// emit declaration functions
-	for _, decl := range file.Decls {
-		switch decl.(type) {
-		case *ast.FuncDecl:
-			emitDeclFunc(MAIN, decl.(*ast.FuncDecl))
-		}
+	for _, fnc := range funcs {
+		emitDeclFunc(MAIN, fnc.decl)
 	}
 }
 
