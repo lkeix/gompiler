@@ -80,7 +80,7 @@ func print() {
 }
 
 func declWalk(decl *ast.Decl) {
-	localvars := make([]*ast.ValueSpec, 0)
+	var localvars []*ast.ValueSpec
 	localoffset := 0
 	paramoffset := 16
 	switch (*decl).(type) {
@@ -90,7 +90,7 @@ func declWalk(decl *ast.Decl) {
 	case *ast.FuncDecl:
 		funcDecl := (*decl).(*ast.FuncDecl)
 		funcParamsWalk(funcDecl.Type.Params, &paramoffset)
-		bodyWalk(funcDecl.Body.List, localvars, &localoffset)
+		localvars = bodyWalk(funcDecl.Body.List, localvars, &localoffset)
 		fnc := &Func{
 			decl:      funcDecl,
 			localvars: localvars,
@@ -115,11 +115,11 @@ func funcParamsWalk(params *ast.FieldList, paramoffset *int) {
 	}
 }
 
-func bodyWalk(stmts []ast.Stmt, localvars []*ast.ValueSpec, localoffset *int) {
+func bodyWalk(stmts []ast.Stmt, localvars []*ast.ValueSpec, localoffset *int) []*ast.ValueSpec {
 	for _, stmt := range stmts {
 		switch s := stmt.(type) {
 		case *ast.DeclStmt: // escape panic error
-			walkDeclField(&s.Decl, localvars, localoffset)
+			localvars = walkDeclField(&s.Decl, localvars, localoffset)
 		case *ast.AssignStmt: // escape panic error
 			walkAssignStmt(s)
 		case *ast.ExprStmt:
@@ -133,9 +133,10 @@ func bodyWalk(stmts []ast.Stmt, localvars []*ast.ValueSpec, localoffset *int) {
 			must(fmt.Errorf("Unexpected stmt type: %T", stmt))
 		}
 	}
+	return localvars
 }
 
-func walkDeclField(decl *ast.Decl, localvars []*ast.ValueSpec, localoffset *int) {
+func walkDeclField(decl *ast.Decl, localvars []*ast.ValueSpec, localoffset *int) []*ast.ValueSpec {
 	switch decl := (*decl).(type) {
 	case *ast.GenDecl:
 		declSpec := decl.Specs[0]
@@ -151,10 +152,12 @@ func walkDeclField(decl *ast.Decl, localvars []*ast.ValueSpec, localoffset *int)
 			*localoffset -= varSize
 			setObjectData(obj, *localoffset)
 			localvars = append(localvars, ds)
+			fmt.Printf("  # localvars: %v\n", localvars)
 		}
 	default:
 		must(fmt.Errorf("unexpected type of declaration: %T", decl))
 	}
+	return localvars
 }
 
 func walkExpr(expr *ast.Expr) {
@@ -211,6 +214,8 @@ func parseGlobalVariables(decl *ast.GenDecl) {
 		if !ok {
 			must(fmt.Errorf("unexpected type %T", valSpec.Type))
 		}
+		// object data is -1(global variable mark)
+		valSpec.Names[0].Obj.Data = -1
 		globalVariables = append(globalVariables, globalVariable{tag: valSpec.Names[0].Name, value: valSpec.Values[0].(*ast.BasicLit).Value, typ: typeIdent})
 	}
 }
@@ -267,38 +272,37 @@ func getLocalOffset(obj *ast.Object) int {
 }
 
 func emitVariable(obj *ast.Object) {
-	fmt.Printf("  # ident kind=%v\n", obj.Kind)
-	fmt.Printf("  # Obj=%v\n", obj)
-	fmt.Printf("  # obj.Data=%d\n", obj.Data)
 	if obj.Kind != ast.Var {
 		must(fmt.Errorf("ident kind should be ast.Var"))
 	}
 
-	localOffset := getLocalOffset(obj)
+	var typ ast.Expr
+	var localOffset int
 
-	valSpec, ok := obj.Decl.(*ast.ValueSpec)
-	if !ok {
-		must(fmt.Errorf("unexpected value spec type %T", obj.Decl))
+	switch dcl := obj.Decl.(type) {
+	case *ast.ValueSpec:
+		typ = dcl.Type
+		localOffset = getLocalOffset(obj) * -1
+	case *ast.Field:
+		typ = dcl.Type
+		localOffset = getLocalOffset(obj)
 	}
 
-	typeIdent, ok := valSpec.Type.(*ast.Ident)
-	if !ok {
-		must(fmt.Errorf("unexpected type %T", valSpec.Type))
-	}
-
-	switch typeIdent.Obj {
+	switch getType(typ) {
 	case globalInt:
 		if getObjectData(obj) == -1 {
 			fmt.Printf("  movq %s+0(%%rip), %%rax\n", obj.Name) // object name(param name) address move to rax
 			fmt.Printf("  pushq %%rax\n")                       // push rax address to stack
 		} else {
-			fmt.Printf("  movq %d(%%rip), %%rax # %s\n", localOffset, obj.Name) // emit local int variable
+			fmt.Printf("  movq %d(%%rbp), %%rax # %s\n", localOffset, obj.Name) // emit local int variable
+			fmt.Printf("  pushq %%rax\n")                                       // push rax address to stack
 		}
 		break
 	case globalString:
 		if getObjectData(obj) == -1 { // obj data is global variable
-			fmt.Printf("  movq %s+8(%%rip), %%rax\n", obj.Name) // address stored string length move to rax
-			fmt.Printf("  pushq %%rax\n")                       // push rax address to stack
+			fmt.Printf("  movq %s+0(%%rip), %%rax\n", obj.Name)
+			fmt.Printf("  movq %s+8(%%rip), %%rcx\n", obj.Name)
+			fmt.Printf("  pushq %%rax\n") // push rax address to stack
 		} else { // obj data is local variable
 			fmt.Printf("  movq %d(%%rbp), %%rax # ptr %s \n", localOffset, obj.Name)   // emit local string variable address
 			fmt.Printf("  movq %d(%%rbp), %%rcx # len %s \n", localOffset+8, obj.Name) // emit local string variable length
@@ -371,13 +375,27 @@ func emitFunc(expr *ast.CallExpr) {
 }
 
 // emitDeclFunc emits assembly code for a declarated function. parse func XXX(...) {...}
-func emitDeclFunc(pkg string, funcDecl *ast.FuncDecl) {
+func emitDeclFunc(pkg string, fnc *Func) {
+	funcDecl := fnc.decl
 	fmt.Printf("# %T\n", funcDecl)
 	fmt.Printf(".text\n")
-	fmt.Printf("%s.%s:\n", pkg, funcDecl.Name)
+	fmt.Printf("%s.%s: # args %d, locals %d\n",
+		pkg,
+		funcDecl.Name,
+		fnc.argsarea,
+		fnc.localarea)
+	fmt.Printf("  pushq %%rbp\n")
+	fmt.Printf("  movq %%rsp, %%rbp\n")
+	fmt.Printf("# localvars: %v\n", fnc.localvars)
+	if len(fnc.localvars) > 0 {
+		fmt.Printf("  subq $%d, %%rsp\n", fnc.localarea)
+	}
 
 	// emit assembly code for function body. parse {...}
 	emitFuncBody(funcDecl.Body)
+
+	// emit return statement
+	fmt.Printf("  ret\n")
 }
 
 func emitFuncBody(body *ast.BlockStmt) {
@@ -391,6 +409,9 @@ func emitFuncBody(body *ast.BlockStmt) {
 		case *ast.AssignStmt: // emit and analyze expression like x := y
 			fmt.Printf("  # *ast.AssignStmt\n")
 			emitAssignStmt(s)
+		case *ast.ReturnStmt:
+			emitExpr(s.Results[0])
+			fmt.Printf("  popq %%rax\n") // return value
 		default:
 			must(fmt.Errorf("unexpected stmt type %T", stmt))
 		}
@@ -425,6 +446,8 @@ func emitVariableAddr(obj *ast.Object) {
 
 	isString := getType(decl.Type) == globalString
 	isInt := getType(decl.Type) == globalInt
+
+	fmt.Printf("# getObjectData: %d\n", getObjectData(obj))
 
 	// analyzed variable is global string variable.
 	if isString && getObjectData(obj) == -1 {
@@ -593,7 +616,7 @@ func generate(file *ast.File) {
 
 	// emit declaration functions
 	for _, fnc := range funcs {
-		emitDeclFunc(MAIN, fnc.decl)
+		emitDeclFunc(MAIN, fnc)
 	}
 }
 
