@@ -292,17 +292,14 @@ func emitVariable(obj *ast.Object) {
 	case globalInt:
 		if getObjectData(obj) == -1 {
 			fmt.Printf("  movq %s+0(%%rip), %%rax\n", obj.Name) // object name(param name) address move to rax
-			fmt.Printf("  pushq %%rax\n")                       // push rax address to stack
 		} else {
 			fmt.Printf("  movq %d(%%rbp), %%rax # %s\n", localOffset, obj.Name) // emit local int variable
-			fmt.Printf("  pushq %%rax\n")                                       // push rax address to stack
 		}
 		break
 	case globalString:
 		if getObjectData(obj) == -1 { // obj data is global variable
 			fmt.Printf("  movq %s+0(%%rip), %%rax\n", obj.Name)
 			fmt.Printf("  movq %s+8(%%rip), %%rcx\n", obj.Name)
-			fmt.Printf("  pushq %%rax\n") // push rax address to stack
 		} else { // obj data is local variable
 			fmt.Printf("  movq %d(%%rbp), %%rax # ptr %s \n", localOffset, obj.Name)   // emit local string variable address
 			fmt.Printf("  movq %d(%%rbp), %%rcx # len %s \n", localOffset+8, obj.Name) // emit local string variable length
@@ -359,11 +356,16 @@ func emitFunc(expr *ast.CallExpr) {
 	fmt.Printf("# fun = %T\n", fun)
 	switch fn := fun.(type) {
 	case *ast.Ident:
+		emitExpr(expr.Args[0]) // push string pointer, push string len
 		if fn.Name == "print" {
 			// build in print
-			emitExpr(expr.Args[0]) // push string pointer, push string len
 			fmt.Printf("  call runtime.print\n")
+			fmt.Printf("  addq $16, %%rsp\n")
+		} else {
+			// FIXME package name is main only.
+			fmt.Printf("  callq main.%s\n", fn.Name)
 			fmt.Printf("  addq $8, %%rsp\n")
+			fmt.Printf("  push %%rax\n")
 		}
 	case *ast.SelectorExpr:
 		emitExpr(expr.Args[0])
@@ -423,6 +425,22 @@ func emitAssignStmt(stmt *ast.AssignStmt) {
 	rhs := stmt.Rhs[0] // rhs is right side of assignment. e.g. x := 5, rhs is 5
 	emitAddr(&lhs)
 	emitExpr(rhs) // push rhs to stack
+
+	switch getType(lhs) {
+	// variable type is string
+	case globalString:
+		fmt.Printf("  popq %%rcx # rhs len\n")
+		fmt.Printf("  popq %%rax # rhs pointer\n")
+		fmt.Printf("  popq %%rdx # lhs len\n")
+		fmt.Printf("  popq %%rsi # lhs pointer\n")
+		fmt.Printf("  movq %%rcx, (%%rdx) # rhs len address -> rdx\n")
+		fmt.Printf("  movq %%rax, (%%rsi) # rhs pointer address -> rax\n")
+	// int
+	default:
+		fmt.Printf("  popq %%rdi # rhs evaluated -> rdi\n")
+		fmt.Printf("  popq %%rax # lhs address -> rax\n")
+		fmt.Printf("  movq %%rdi, (%%rax) # rhs address -> rax\n ")
+	}
 }
 
 func emitAddr(expr *ast.Expr) {
@@ -470,7 +488,8 @@ func emitVariableAddr(obj *ast.Object) {
 
 	if isInt && getObjectData(obj) == -1 {
 		fmt.Printf("  # Global\n")
-		fmt.Printf("  # leaq %s+0(%%rip), %%rax\n", obj.Name)
+		fmt.Printf("  leaq %s+0(%%rip), %%rax\n", obj.Name)
+		fmt.Printf("  pushq %%rax\n")
 	}
 	if isInt && getObjectData(obj) != -1 {
 		localOffset := getObjectData(obj)
