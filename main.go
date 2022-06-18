@@ -480,8 +480,8 @@ func emitVariableAddr(obj *ast.Object) {
 	if isString && getObjectData(obj) != -1 {
 		localOffset := getObjectData(obj)
 		fmt.Printf("  # Local\n")
-		fmt.Printf("  leaq -%d(%%rbp), %%rax # ptr %s\n", localOffset, obj.Name)
-		fmt.Printf("  leaq -%d(%%rbp), %%rcx # len %s\n", localOffset-8, obj.Name)
+		fmt.Printf("  leaq %d(%%rbp), %%rax # ptr %s\n", localOffset, obj.Name)
+		fmt.Printf("  leaq %d(%%rbp), %%rcx # len %s\n", localOffset-8, obj.Name)
 		fmt.Printf("  pushq %%rax\n")
 		fmt.Printf("  pushq %%rcx\n")
 	}
@@ -494,7 +494,8 @@ func emitVariableAddr(obj *ast.Object) {
 	if isInt && getObjectData(obj) != -1 {
 		localOffset := getObjectData(obj)
 		fmt.Printf("  # Local\n")
-		fmt.Printf("  leaq -%d(%%rbp), %%rax # %s \n", localOffset, obj.Name)
+		fmt.Printf("  leaq %d(%%rbp), %%rax # %s \n", localOffset, obj.Name)
+		fmt.Printf("  pushq %%rax\n")
 	}
 }
 
