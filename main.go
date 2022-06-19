@@ -404,7 +404,7 @@ func emitFuncBody(body *ast.BlockStmt) {
 	for _, stmt := range body.List {
 		switch s := stmt.(type) {
 		case *ast.ExprStmt:
-			expr := stmt.(*ast.ExprStmt).X
+			expr := s.X
 			emitExpr(expr)
 		case *ast.DeclStmt:
 			continue
