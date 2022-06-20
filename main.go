@@ -82,20 +82,21 @@ func print() {
 func declWalk(decl *ast.Decl) {
 	var localvars []*ast.ValueSpec
 	localoffset := 0
-	paramoffset := 16
 	switch (*decl).(type) {
 	case *ast.GenDecl:
 		// extract global variables before analyze declaration functions
 		parseGlobalVariables((*decl).(*ast.GenDecl))
 	case *ast.FuncDecl:
 		funcDecl := (*decl).(*ast.FuncDecl)
-		funcParamsWalk(funcDecl.Type.Params, &paramoffset)
+		paramoffset := new(int)
+		*paramoffset = 16
+		funcParamsWalk(funcDecl.Type.Params, paramoffset)
 		localvars = bodyWalk(funcDecl.Body.List, localvars, &localoffset)
 		fnc := &Func{
 			decl:      funcDecl,
 			localvars: localvars,
 			localarea: localoffset * -1,
-			argsarea:  paramoffset,
+			argsarea:  *paramoffset,
 		}
 		funcs = append(funcs, fnc)
 	default:
@@ -209,13 +210,13 @@ func parseGlobalVariables(decl *ast.GenDecl) {
 			must(fmt.Errorf("unexpected value spec type %T", decl.Specs[0]))
 		}
 		fmt.Printf("# spec.Name=%v, spec.Value=%v\n", valSpec.Names[0], valSpec.Values[0])
+		valSpec.Names[0].Obj.Data = -1
 		parseGrobalVariable(valSpec)
 		typeIdent, ok := valSpec.Type.(*ast.Ident)
 		if !ok {
 			must(fmt.Errorf("unexpected type %T", valSpec.Type))
 		}
 		// object data is -1(global variable mark)
-		valSpec.Names[0].Obj.Data = -1
 		globalVariables = append(globalVariables, globalVariable{tag: valSpec.Names[0].Name, value: valSpec.Values[0].(*ast.BasicLit).Value, typ: typeIdent})
 	}
 }
@@ -282,10 +283,10 @@ func emitVariable(obj *ast.Object) {
 	switch dcl := obj.Decl.(type) {
 	case *ast.ValueSpec:
 		typ = dcl.Type
-		localOffset = getLocalOffset(obj) * -1
+		localOffset = getObjectData(obj) * -1
 	case *ast.Field:
 		typ = dcl.Type
-		localOffset = getLocalOffset(obj)
+		localOffset = getObjectData(obj)
 	}
 
 	switch getType(typ) {
@@ -295,7 +296,7 @@ func emitVariable(obj *ast.Object) {
 		} else {
 			fmt.Printf("  movq %d(%%rbp), %%rax # %s\n", localOffset, obj.Name) // emit local int variable
 		}
-		break
+		fmt.Printf("  pushq %%rax\n")
 	case globalString:
 		if getObjectData(obj) == -1 { // obj data is global variable
 			fmt.Printf("  movq %s+0(%%rip), %%rax\n", obj.Name)
@@ -356,23 +357,24 @@ func emitFunc(expr *ast.CallExpr) {
 	fmt.Printf("# fun = %T\n", fun)
 	switch fn := fun.(type) {
 	case *ast.Ident:
-		emitExpr(expr.Args[0]) // push string pointer, push string len
 		if fn.Name == "print" {
+			emitExpr(expr.Args[0])
 			// build in print
 			fmt.Printf("  call runtime.print\n")
 			fmt.Printf("  addq $16, %%rsp\n")
 		} else {
+			for _, arg := range expr.Args { // for mult argument
+				emitExpr(arg)
+			}
 			// FIXME package name is main only.
 			fmt.Printf("  callq main.%s\n", fn.Name)
-			fmt.Printf("  addq $8, %%rsp\n")
-			fmt.Printf("  push %%rax\n")
+			fmt.Printf("  addq $%d, %%rsp\n", len(expr.Args)*8)
+			fmt.Printf("  pushq %%rax\n")
 		}
 	case *ast.SelectorExpr:
 		emitExpr(expr.Args[0])
-		fmt.Printf("  popq %%rax\n")
-		fmt.Printf("  pushq %%rax\n")
 		symbol := fmt.Sprintf("%s.%s", fn.X, fn.Sel)
-		fmt.Printf("  callq %s\n\n", symbol)
+		fmt.Printf("  callq %s\n", symbol)
 	}
 }
 
@@ -396,6 +398,7 @@ func emitDeclFunc(pkg string, fnc *Func) {
 	// emit assembly code for function body. parse {...}
 	emitFuncBody(funcDecl.Body)
 
+	fmt.Printf("  leave\n")
 	// emit return statement
 	fmt.Printf("  ret\n")
 }
@@ -480,8 +483,8 @@ func emitVariableAddr(obj *ast.Object) {
 	if isString && getObjectData(obj) != -1 {
 		localOffset := getObjectData(obj)
 		fmt.Printf("  # Local\n")
-		fmt.Printf("  leaq %d(%%rbp), %%rax # ptr %s\n", localOffset, obj.Name)
-		fmt.Printf("  leaq %d(%%rbp), %%rcx # len %s\n", localOffset-8, obj.Name)
+		fmt.Printf("  leaq -%d(%%rbp), %%rax # ptr %s\n", localOffset, obj.Name)
+		fmt.Printf("  leaq -%d(%%rbp), %%rcx # len %s\n", localOffset-8, obj.Name)
 		fmt.Printf("  pushq %%rax\n")
 		fmt.Printf("  pushq %%rcx\n")
 	}
@@ -494,7 +497,7 @@ func emitVariableAddr(obj *ast.Object) {
 	if isInt && getObjectData(obj) != -1 {
 		localOffset := getObjectData(obj)
 		fmt.Printf("  # Local\n")
-		fmt.Printf("  leaq %d(%%rbp), %%rax # %s \n", localOffset, obj.Name)
+		fmt.Printf("  leaq -%d(%%rbp), %%rax # %s \n", localOffset, obj.Name)
 		fmt.Printf("  pushq %%rax\n")
 	}
 }
@@ -547,11 +550,9 @@ func getType(typeExpr ast.Expr) *ast.Object {
 
 func getObjectData(object *ast.Object) int {
 	data, ok := object.Data.(int)
-
 	if !ok {
 		must(fmt.Errorf("unexpected object data type %T", object.Data))
 	}
-
 	return data
 }
 
