@@ -415,8 +415,10 @@ func emitFuncBody(body *ast.BlockStmt) {
 			fmt.Printf("  # *ast.AssignStmt\n")
 			emitAssignStmt(s)
 		case *ast.ReturnStmt:
-			emitExpr(s.Results[0])
-			fmt.Printf("  popq %%rax\n") // return value
+			if len(s.Results) == 1 {
+				emitExpr(s.Results[0])
+				fmt.Printf("  popq %%rax\n") // return value
+			}
 		default:
 			must(fmt.Errorf("unexpected stmt type %T", stmt))
 		}
