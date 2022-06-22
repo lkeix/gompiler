@@ -64,7 +64,10 @@ func runtime() {
 	fmt.Printf("# runtime\n")
 	fmt.Printf(".global _start\n")
 	fmt.Printf("_start:\n")
-	fmt.Printf("  callq main.main\n\n")
+	fmt.Printf("  callq main.main\n")
+	fmt.Printf("  movq $0, %%rdi\n")
+	fmt.Printf("  movq $60, %%rax\n")
+	fmt.Printf("  syscall\n\n") // emit syscall
 }
 
 func print() {
@@ -72,8 +75,8 @@ func print() {
 	fmt.Printf(".text\n")
 	fmt.Printf("runtime.print:\n")
 	fmt.Printf("  movq $2, %%rdi\n")        // set 2 to rdi (stderr)
-	fmt.Printf("  movq 16(%%rsp), %%rsi\n") // set 16(rsp) to rsi (string)
-	fmt.Printf("  movq 8(%%rsp), %%rdx\n")  // set 8(rsp) to rdx (length)
+	fmt.Printf("  movq 8(%%rsp), %%rsi\n")  // set 16(rsp) to rsi (string)
+	fmt.Printf("  movq 16(%%rsp), %%rdx\n") // set 8(rsp) to rdx (length)
 	fmt.Printf("  movq $1, %%rax\n")        // set 1 to rax (syscall number)
 	fmt.Printf("  syscall\n")
 	fmt.Printf("  ret\n\n")
@@ -305,8 +308,8 @@ func emitVariable(obj *ast.Object) {
 			fmt.Printf("  movq %d(%%rbp), %%rax # ptr %s \n", localOffset, obj.Name)   // emit local string variable address
 			fmt.Printf("  movq %d(%%rbp), %%rcx # len %s \n", localOffset+8, obj.Name) // emit local string variable length
 		}
-		fmt.Printf("  pushq %%rax # ptr\n")
 		fmt.Printf("  pushq %%rcx # len\n")
+		fmt.Printf("  pushq %%rax # ptr\n")
 	default:
 		must(fmt.Errorf("Unexpected global ident"))
 	}
@@ -354,7 +357,7 @@ func emitBinaryExpr(expr *ast.BinaryExpr) {
 
 func emitFunc(expr *ast.CallExpr) {
 	fun := expr.Fun
-	fmt.Printf("# fun = %T\n", fun)
+	fmt.Printf("  # fun = %T\n", fun)
 	switch fn := fun.(type) {
 	case *ast.Ident:
 		if fn.Name == "print" {
@@ -364,9 +367,10 @@ func emitFunc(expr *ast.CallExpr) {
 			fmt.Printf("  addq $16, %%rsp\n")
 		} else {
 			argsSize := 0
-			for _, arg := range expr.Args { // for mult argument
-				emitExpr(arg)
-				argsSize += getExprSize(&arg)
+			// push args like stack
+			for i := len(expr.Args) - 1; i >= 0; i-- {
+				emitExpr(expr.Args[i])
+				argsSize += getExprSize(&expr.Args[i])
 			}
 			// FIXME package name is main only.
 			fmt.Printf("  callq main.%s\n", fn.Name)
@@ -388,8 +392,8 @@ func emitFunc(expr *ast.CallExpr) {
 					fmt.Printf("  pushq %%rax\n")
 
 				case globalString:
-					fmt.Printf("  pushq %%rax # ptr \n")
 					fmt.Printf("  pushq %%rsi # len \n")
+					fmt.Printf("  pushq %%rax # ptr \n")
 				}
 			}
 		}
@@ -504,8 +508,8 @@ func emitVariableAddr(obj *ast.Object) {
 		fmt.Printf("# Global\n")
 		fmt.Printf("  leaq %s+0(%%rip), %%rax\n", obj.Name)
 		fmt.Printf("  leaq %s+8(%%rip), %%rcx\n", obj.Name)
-		fmt.Printf("  pushq %%rax\n")
 		fmt.Printf("  pushq %%rcx\n")
+		fmt.Printf("  pushq %%rax\n")
 	}
 
 	// analyzed variable is local string variable.
@@ -514,8 +518,8 @@ func emitVariableAddr(obj *ast.Object) {
 		fmt.Printf("  # Local\n")
 		fmt.Printf("  leaq -%d(%%rbp), %%rax # ptr %s\n", localOffset, obj.Name)
 		fmt.Printf("  leaq -%d(%%rbp), %%rcx # len %s\n", localOffset-8, obj.Name)
-		fmt.Printf("  pushq %%rax\n")
 		fmt.Printf("  pushq %%rcx\n")
+		fmt.Printf("  pushq %%rax\n")
 	}
 
 	if isInt && getObjectData(obj) == -1 {
