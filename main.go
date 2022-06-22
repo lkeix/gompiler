@@ -321,10 +321,10 @@ func emitBasicLit(expr *ast.BasicLit) {
 		fmt.Printf("  movq $%d, %%rax\n", ival)
 		fmt.Printf("  pushq %%rax\n")
 	} else if expr.Kind.String() == "STRING" {
+		fmt.Printf("  pushq $%d\n", len(expr.Value)-1-2)
 		// FIXME: searchTag function computable complexity is O(n)
 		fmt.Printf("  leaq %s, %%rax\n", searchTag(expr.Value))
 		fmt.Printf("  pushq %%rax\n")
-		fmt.Printf("  pushq $%d\n", len(expr.Value)-1-2)
 		stringLiterals = stringLiterals[1:]
 	} else {
 		must(fmt.Errorf("unexpected basic literal type %T", expr))
@@ -363,13 +363,35 @@ func emitFunc(expr *ast.CallExpr) {
 			fmt.Printf("  call runtime.print\n")
 			fmt.Printf("  addq $16, %%rsp\n")
 		} else {
+			argsSize := 0
 			for _, arg := range expr.Args { // for mult argument
 				emitExpr(arg)
+				argsSize += getExprSize(&arg)
 			}
 			// FIXME package name is main only.
 			fmt.Printf("  callq main.%s\n", fn.Name)
-			fmt.Printf("  addq $%d, %%rsp\n", len(expr.Args)*8)
-			fmt.Printf("  pushq %%rax\n")
+			fmt.Printf("  addq $%d, %%rsp\n", argsSize)
+
+			// next!!!!
+			obj := fn.Obj
+			dclfn, ok := obj.Decl.(*ast.FuncDecl)
+			if !ok {
+				must(fmt.Errorf("unexpected obj type %T", obj))
+			}
+
+			if dclfn.Type.Results != nil {
+				// FIXME: can multi return value
+				// return length is 1
+				retval := dclfn.Type.Results.List[0]
+				switch getType(retval.Type) {
+				case globalInt:
+					fmt.Printf("  pushq %%rax\n")
+
+				case globalString:
+					fmt.Printf("  pushq %%rax # ptr \n")
+					fmt.Printf("  pushq %%rsi # len \n")
+				}
+			}
 		}
 	case *ast.SelectorExpr:
 		emitExpr(expr.Args[0])
@@ -418,7 +440,12 @@ func emitFuncBody(body *ast.BlockStmt) {
 			if len(s.Results) == 1 {
 				emitExpr(s.Results[0])
 				fmt.Printf("  popq %%rax\n") // return value
+				if getType(s.Results[0]) == globalString {
+					fmt.Printf("  popq %%rsi\n")
+				}
 			}
+			fmt.Printf("  leave\n")
+			fmt.Printf("  ret\n")
 		default:
 			must(fmt.Errorf("unexpected stmt type %T", stmt))
 		}
@@ -535,15 +562,39 @@ func emitSL() {
 	fmt.Printf("\n")
 }
 
+func getExprSize(expr *ast.Expr) int {
+	typ := getType(*expr)
+	if typ == globalString {
+		return 8 * 2
+	} else if typ == globalInt {
+		return 8
+	}
+	return 0
+}
+
 func getType(typeExpr ast.Expr) *ast.Object {
 	switch expr := typeExpr.(type) {
 	case *ast.Ident:
 		if expr.Obj.Kind == ast.Var {
-			return getType(expr.Obj.Decl.(*ast.ValueSpec).Type)
+			switch decl := expr.Obj.Decl.(type) {
+			case *ast.ValueSpec:
+				return getType(decl.Type)
+			case *ast.Field:
+				return getType(decl.Type)
+			}
 		}
 		if expr.Obj.Kind == ast.Typ {
 			return expr.Obj
 		}
+	case *ast.BasicLit:
+		switch expr.Kind.String() {
+		case "STRING":
+			return globalString
+		case "INT":
+			return globalInt
+		}
+	case *ast.BinaryExpr:
+		return getType(expr.X)
 	default:
 		must(fmt.Errorf("unexpected typeExpr type %T", typeExpr))
 	}
