@@ -2,14 +2,24 @@ package main
 
 import "os"
 
-var (
-	globalstring string = "I'm global string\n"
-	globalint1   int    = 30
-	globalint2   int    = 0
-)
+var globalstring string = "I'm global string\n"
+var globalint1 int = 30
+var globalint2 int = 2
 
 func f1(x int) int {
 	return x + 1
+}
+
+func sum(a int, b int) int {
+	return a + b
+}
+
+func join(a string, b string) string {
+	return a + b
+}
+
+func returnString() string {
+	return "aaaaa\n"
 }
 
 func main() {
@@ -28,8 +38,18 @@ func main() {
 
 	var localint1 int
 	localint1 = 10
+	var tmp string
+	tmp = returnString()
+	print(tmp)
+
+	/*
+		var joined string
+		joined = join(globalstring, localstring1)
+		globalstring = "concat string for localint1 "
+		print(joined)
+	*/
 
 	print("end!\n")
 
-	os.Exit(globalint1 + globalint2 + localint1)
+	os.Exit(globalint1 + sum(localint1, globalint2))
 }
