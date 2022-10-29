@@ -221,7 +221,7 @@ func gen(node *Node) {
 	case NSub:
 		fmt.Printf("  sub rax, rdi\n")
 	case NMul:
-		fmt.Printf("  mul rax, rdi\n")
+		fmt.Printf("  imul rax, rdi\n")
 	case NDiv:
 		fmt.Printf("  cqo\n")
 		fmt.Printf("  idiv rax, rdi\n")
