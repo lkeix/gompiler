@@ -56,9 +56,8 @@ func tokenize(code string) *Token {
 			code[i] == '(' ||
 			code[i] == ')' {
 			current = newToken(Reserved, current, string(code[i:i+1]))
+			continue
 		}
-
-		// relation
 
 		// number
 		if unicode.IsDigit(rune(code[i])) {
@@ -67,6 +66,23 @@ func tokenize(code string) *Token {
 			current = newToken(Number, current, string(code[i:j]))
 			current.val = val
 			i = j - 1
+		}
+		// relation
+		if i >= len(code)-1 {
+			continue
+		}
+
+		if code[i:i+2] == "==" ||
+			code[i:i+2] == "!=" ||
+			code[i:i+2] == "<=" ||
+			code[i:i+2] == ">=" {
+			current = newToken(Reserved, current, code[i:i+2])
+			continue
+		}
+
+		if code[i] == '<' ||
+			code[i] == '>' {
+			current = newToken(Reserved, current, string(code[i]))
 		}
 	}
 
@@ -95,6 +111,13 @@ const (
 	Sub
 	Mul
 	Div
+	Eq
+	Ne
+	Ge
+	Gt
+	Le
+	Lt
+	Equality
 	NNumber
 )
 
@@ -140,8 +163,54 @@ func (p *Parser) expectNumber() int {
 	return val
 }
 
-// expr = mul() ( + mul() | - mul()) *
+// expr = Equality()
 func (p *Parser) expr() *Node {
+	return p.Equality()
+}
+
+// relation = add() (< add() | > add() | < add() | >= add())*
+func (p *Parser) Relation() *Node {
+	n := p.add()
+
+	for {
+		if p.consume("<") {
+			n = newBinary(Lt, n, p.add())
+		}
+
+		if p.consume("<=") {
+			n = newBinary(Le, n, p.add())
+		}
+
+		if p.consume(">") {
+			n = newBinary(Lt, p.add(), n)
+		}
+
+		if p.consume(">=") {
+			n = newBinary(Le, p.add(), n)
+		}
+		return n
+	}
+}
+
+// Equality = relation() (== Relation() | != Relation())*
+func (p *Parser) Equality() *Node {
+	n := p.Relation()
+
+	for {
+		if p.consume("==") {
+			n = newBinary(Eq, n, p.Relation())
+		}
+
+		if p.consume("!=") {
+			n = newBinary(Ne, n, p.Relation())
+		}
+
+		return n
+	}
+}
+
+// add = mul() (+ mul() | - mul())*
+func (p *Parser) add() *Node {
 	n := p.mul()
 
 	for {
@@ -149,7 +218,7 @@ func (p *Parser) expr() *Node {
 			n = newBinary(Add, n, p.mul())
 		}
 		if p.consume("-") {
-			n = newBinary(Sub, n, p.mul())
+			n = newBinary(Add, n, p.mul())
 		}
 		return n
 	}
@@ -206,6 +275,22 @@ func gen(node *Node) {
 	fmt.Printf("  pop rax\n")
 
 	switch node.kind {
+	case Lt:
+		fmt.Printf("  cmp rax, rdi\n")
+		fmt.Printf("  setl al\n")
+		fmt.Printf("  movzx rax, al\n")
+	case Le:
+		fmt.Printf("  cmp rax, rdi\n")
+		fmt.Printf("  setle al\n")
+		fmt.Printf("  movzx rax, al\n")
+	case Ne:
+		fmt.Printf("  cmp rax, rdi\n")
+		fmt.Printf("  setne al\n")
+		fmt.Printf("  movzx rax, al\n")
+	case Eq:
+		fmt.Printf("  cmp rax, rdi\n")
+		fmt.Printf("  sete al\n")
+		fmt.Printf("  movzx rax, al\n")
 	case Add:
 		fmt.Printf("  add rax, rdi\n")
 	case Sub:
