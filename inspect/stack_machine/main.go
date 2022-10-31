@@ -111,7 +111,6 @@ func tokenize(input string) *Token {
 }
 
 // Parser
-
 type (
 	NodeKind int
 
